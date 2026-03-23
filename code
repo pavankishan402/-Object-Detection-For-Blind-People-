@@ -1,0 +1,257 @@
+#include <IOXhop_FirebaseESP32.h>
+#include <TinyGPS++.h>
+#include <Wire.h>
+#include "DFRobotDFPlayerMini.h"
+DFRobotDFPlayerMini myDFPlayer;
+
+#define RXD1 25
+#define TXD1 26
+
+TinyGPSPlus gps;
+volatile float minutes, seconds;
+volatile int degree, secs, mins;
+double lat_val, lng_val;
+float latt = 12.975942;
+float longg = 77.4834305;
+
+#define TRIG   5
+#define ECHO   18
+
+const int waterpin = 33;
+
+struct Button {
+  const uint8_t PIN;
+  bool pressed;
+};
+
+Button button1 = {19,  false};
+
+void IRAM_ATTR isr1() {
+  button1.pressed = true;
+}
+
+
+long getDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  long duration = pulseIn(echoPin, HIGH, 30000); // timeout 30ms
+  if (duration == 0) return 999;  // if no echo, return large value
+
+  long distance = duration * 0.034 / 2;  // cm
+  return distance;
+}
+
+#define FIREBASE_HOST "objectdetation-default-rtdb.firebaseio.com"                         // the project name address from firebase id
+#define FIREBASE_AUTH "cfXBjMakgybv266tOB5hrwfMFC1TqjHo34ehIavw"            // the secret key generated from firebase
+#define WIFI_SSID "PAVANU"                                           // input your home or public wifi name 
+#define WIFI_PASSWORD "ANUP2025"
+
+void setup() {
+  Serial.begin(115200);
+  Serial2.begin(9600);
+  Serial.println("WELCOME");
+  pinMode(TRIG, OUTPUT);
+  pinMode(ECHO, INPUT);
+  pinMode(waterpin, INPUT);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("connecting");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+  delay(200);
+  Serial.println();
+  Serial.print("connected: ");
+  Serial.println(WiFi.localIP());
+
+  delay(200);
+  Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
+  delay(200);
+  pinMode(button1.PIN, INPUT_PULLUP);
+  attachInterrupt(button1.PIN, isr1, FALLING);
+  delay(200);
+  Serial1.begin(9600, SERIAL_8N1, RXD1, TXD1);
+  delay(200);
+  Serial.println();
+  Serial.println(F("DFRobot DFPlayer Mini Demo"));
+  Serial.println(F("Initializing DFPlayer ... (May take 3~5 seconds)"));
+  myDFPlayer.begin(Serial1);
+  //  if (!myDFPlayer.begin(Serial1)) {  //Use softwareSerial to communicate with mp3.
+  //    Serial.println(F("Unable to begin:"));
+  //    Serial.println(F("1.Please recheck the connection!"));
+  //    Serial.println(F("2.Please insert the SD card!"));
+  //    while (true);
+  //  }
+  Serial.println(F("DFPlayer Mini online."));
+  delay(4000);
+  myDFPlayer.volume(30);  //Set volume value. From 0 to 30
+  delay(100);
+  myDFPlayer.EQ(1);
+  delay(100);
+  myDFPlayer.play(1); //play specific mp3 in SD:/MP3/0004.mp3; File Name(0~65535)
+  delay(3000);
+
+}
+
+
+void gpslocation()
+{
+  Serial.println("*****");
+  smartDelay(100);
+  unsigned long start;
+
+  bool loc_valid, alt_valid, time_valid;
+  lat_val = gps.location.lat();
+  loc_valid = gps.location.isValid();
+  lng_val = gps.location.lng();
+
+  if (!loc_valid)
+  {
+    Serial.print("Latitude : ");
+    Serial.println(latt, 6);
+
+    Serial.print("Longitude : ");
+    Serial.println(longg, 6);
+    Firebase.setFloat("Lat", latt);
+    delay(200);
+    Firebase.setFloat("Long", longg);
+    delay(200);
+    //    char buffer1[10]; // Buffer to hold the formatted string
+    //    dtostrf(latt, 8, 6, buffer1);
+    //    char buffer2[10]; // Buffer to hold the formatted string
+    //    dtostrf(longg, 8, 6, buffer2);
+    //    lcd.clear();
+    //    lcd.setCursor(0, 0);
+    //    lcd.print("LAT:");
+    //    lcd.setCursor(5, 0);
+    //    lcd.print(buffer1);
+    //    lcd.setCursor(0, 1);
+    //    lcd.print("LNG:");
+    //    lcd.setCursor(5, 1);
+    //    lcd.print(buffer2);
+    //    delay(500);
+
+  }
+  else
+  {
+    DegMinSec(lat_val);
+    Serial.print("Latitude in Decimal Degrees : ");
+    Serial.println(lat_val, 6);
+
+    Firebase.setFloat("Lat", lat_val);
+    delay(200);
+    Serial.print("Longitude in Decimal Degrees : ");
+    Serial.println(lng_val, 6);
+    Firebase.setFloat("Long", lng_val);
+    delay(200);
+    //    char buffer1[10]; // Buffer to hold the formatted string
+    //    dtostrf(lat_val, 8, 6, buffer1);
+    //    char buffer2[10]; // Buffer to hold the formatted string
+    //    dtostrf(lng_val, 8, 6, buffer2);
+    //    lcd.clear();
+    //    lcd.setCursor(0, 0);
+    //    lcd.print("LAT:");
+    //    lcd.setCursor(5, 0);
+    //    lcd.print(buffer1);
+    //    lcd.setCursor(0, 1);
+    //    lcd.print("LNG:");
+    //    lcd.setCursor(5, 1);
+    //    lcd.print(buffer2);
+    //    delay(500);
+  }
+  delay(300);
+}
+
+static void smartDelay(unsigned long ms)
+{
+  unsigned long start = millis();
+  do
+  {
+    while (Serial2.available())  /* Encode data read from GPS while data is available on serial port */
+      gps.encode(Serial2.read());
+    /* Encode basically is used to parse the string received by the GPS and to store it in a buffer so that information can be extracted from it */
+  } while (millis() - start < ms);
+}
+
+void DegMinSec( double tot_val)   /* Convert data in decimal degrees into degrees minutes seconds form */
+{
+  degree = (int)tot_val;
+  minutes = tot_val - degree;
+  seconds = 60 * minutes;
+  minutes = (int)seconds;
+  mins = (int)minutes;
+  seconds = seconds - minutes;
+  seconds = 60 * seconds;
+  secs = (int)seconds;
+}
+
+void readwater() {
+  float sensorValue = analogRead(waterpin);
+  Serial.print("Water Value: ");
+  Serial.println(sensorValue);
+  if (sensorValue < 2000 )
+  {
+    Serial.println("Water Detected");
+    delay(200);
+    Firebase.setFloat ("waterflag", 1);
+    delay(100);
+    Firebase.setFloat ("waterflag", 0);
+    delay(100);
+    myDFPlayer.play(2); //play specific mp3 in SD:/MP3/0004.mp3; File Name(0~65535)
+    delay(3000);
+
+  }
+}
+
+void loop() {
+  readwater();
+  gpslocation();
+  if (button1.pressed)
+  {
+
+    Serial.println("EMERGENCY");
+    myDFPlayer.play(3); //play specific mp3 in SD:/MP3/0004.mp3; File Name(0~65535)
+    delay(3000);
+    Firebase.setFloat("emflag", 1);
+    delay(200);
+    Firebase.setFloat("emflag", 0);
+    delay(200);
+    button1.pressed = false;
+    delay(2000);
+
+  }
+  long dist  = getDistance(TRIG, ECHO);
+  Serial.print("Distance: ");  Serial.print(dist);  Serial.print(" cm | ");
+  Firebase.setFloat ("Distance", dist);
+  delay(100);
+
+  if (dist < 15  ) {
+    Serial.println("Object Ahead at NEAR");
+    myDFPlayer.play(4); //play specific mp3 in SD:/MP3/0004.mp3; File Name(0~65535)
+    delay(3000);
+    Firebase.setFloat ("distanceflag1", 1);
+    delay(100);
+    Firebase.setFloat ("distanceflag1", 0);
+    delay(100);
+
+  }
+  else if ( dist >= 15 && dist < 50)
+  {
+    Serial.println("Object Ahead at FAR");
+    myDFPlayer.play(5); //play specific mp3 in SD:/MP3/0004.mp3; File Name(0~65535)
+    delay(3000);
+    Firebase.setFloat ("distanceflag2", 1);
+    delay(100);
+    Firebase.setFloat ("distanceflag2", 0);
+    delay(100);
+  }
+  else {
+
+  }
+}
